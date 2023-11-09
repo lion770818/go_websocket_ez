@@ -105,7 +105,7 @@ func userHandler(w http.ResponseWriter, r *http.Request) {
 
 				// TODO:新增 user 到 Redis
 
-				// 向錢包進行提款動作
+				// 取得用戶錢包數量
 				data := map[string]interface{}{
 					"userId": user.UserId, // 使用socketId 暫時當作用戶的UserId
 				}

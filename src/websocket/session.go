@@ -180,10 +180,12 @@ func (conn *Connection) writeLoop() {
 
 }
 
+// 主動關閉用戶
 func (conn *Connection) ShutDown() {
 	conn.closeChan <- 1
 }
 
+// 取得用戶連線IP
 func (conn *Connection) GetIP(req *http.Request) (string, int64) {
 
 	// proxy 轉發
@@ -199,15 +201,9 @@ func (conn *Connection) GetIP(req *http.Request) (string, int64) {
 
 	// 取出 socketID
 	ipStr := strings.Split(clientIpStr, ":")
-	//var err error
 	var socketID int64
 	var clientIP string
 	if len(ipStr) > 1 {
-		//socketID, err = strconv.Atoi(ipStr[1])
-		// if err != nil {
-		// 	log.Printf("ip解析錯誤...clientIpStr=%s", clientIpStr)
-		// 	return "", 0
-		// }
 		socketID = util.Str2Int64(ipStr[1])
 
 		// IP + socketID 取ipStr[0]

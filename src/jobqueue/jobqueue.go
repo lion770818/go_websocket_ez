@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	QUEUE_MAX = 1000
+	QUEUE_MAX = 100
 )
 
 // 佇列種類
