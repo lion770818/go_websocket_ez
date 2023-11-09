@@ -3,7 +3,10 @@ package ws
 import (
 	"errors"
 	"log"
+	"net/http"
 	"runtime/debug"
+	"server/src/util"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,6 +26,9 @@ type Connection struct {
 
 	mutex    sync.Mutex // 對closeChan關閉上鎖
 	isClosed bool       // 防止closeChan被關閉多次
+
+	ip       string
+	socketId int
 }
 
 // 配置一個websocket連線
@@ -35,6 +41,7 @@ func NewConnection(wsConn *websocket.Conn) (conn *Connection) {
 		closeChan: make(chan int32, 1),             // 關閉訊號通道
 	}
 
+	log.Printf("配置一個websocket連線")
 	return
 }
 
@@ -73,15 +80,22 @@ func (conn *Connection) WriteMessage(data []byte) (err error) {
 
 func (conn *Connection) Close() {
 
+	log.Printf("webscoket conn 資源釋放  socketId:%v", conn.socketId)
+
+	if !conn.isClosed {
+		return
+	}
+
+	conn.mutex.Lock()
+	defer conn.mutex.Unlock()
+
 	conn.wsConnect.Close() // 關閉 ws 資源
+	close(conn.inChan)     // 關閉通道
+	close(conn.outChan)    // 關閉通道
+	close(conn.closeChan)  // 關閉通道
 
 	// 利用flag，讓closeChan只關閉一次
-	conn.mutex.Lock()
-	if !conn.isClosed {
-		close(conn.closeChan) // 關閉通道
-		conn.isClosed = true
-	}
-	conn.mutex.Unlock()
+	conn.isClosed = true
 }
 
 // 讀取資料 goroutine
@@ -99,8 +113,11 @@ func (conn *Connection) readLoop() {
 	)
 
 	defer func() {
-		log.Printf("close readLoop")
+		log.Printf("close readLoop socketId:%v", conn.socketId)
+		conn.ShutDown()
 		conn.Close()
+
+		log.Printf("exit readLoop....")
 	}()
 
 	for {
@@ -124,7 +141,6 @@ func (conn *Connection) readLoop() {
 		}
 
 	}
-
 }
 
 // 寫入資料 goroutine
@@ -142,8 +158,11 @@ func (conn *Connection) writeLoop() {
 	)
 
 	defer func() {
-		log.Printf("close writeLoop")
+		log.Printf("close writeLoop socketId:%v", conn.socketId)
+		conn.ShutDown()
 		conn.Close()
+
+		log.Printf("exit writeLoop....")
 	}()
 
 	for {
@@ -163,4 +182,40 @@ func (conn *Connection) writeLoop() {
 
 func (conn *Connection) ShutDown() {
 	conn.closeChan <- 1
+}
+
+func (conn *Connection) GetIP(req *http.Request) (string, int64) {
+
+	// proxy 轉發
+	clientIpStr := req.Header.Get("X-Forwarded-For")
+	// 一般直連的 IP
+	if len(clientIpStr) == 0 {
+		clientIpStr = req.RemoteAddr
+	}
+	// 原本寫法
+	if len(clientIpStr) == 0 {
+		clientIpStr = req.Host
+	}
+
+	// 取出 socketID
+	ipStr := strings.Split(clientIpStr, ":")
+	//var err error
+	var socketID int64
+	var clientIP string
+	if len(ipStr) > 1 {
+		//socketID, err = strconv.Atoi(ipStr[1])
+		// if err != nil {
+		// 	log.Printf("ip解析錯誤...clientIpStr=%s", clientIpStr)
+		// 	return "", 0
+		// }
+		socketID = util.Str2Int64(ipStr[1])
+
+		// IP + socketID 取ipStr[0]
+		clientIP = ipStr[0]
+	} else {
+		// 只有一個參數
+		clientIP = clientIpStr
+	}
+
+	return clientIP, socketID
 }

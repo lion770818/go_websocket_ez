@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"runtime/debug"
 
+	"server/src/jobqueue"
+	"server/src/transaction"
 	"server/src/util"
 	ws "server/src/websocket"
 
@@ -21,6 +23,11 @@ var (
 		},
 	}
 )
+
+type User struct {
+	UserId  int64
+	QueueMg *jobqueue.QueueWorkManager
+}
 
 func userHandler(w http.ResponseWriter, r *http.Request) {
 
@@ -40,10 +47,22 @@ func userHandler(w http.ResponseWriter, r *http.Request) {
 
 	// 建立 ws 連線資源
 	conn := ws.NewConnection(websocket_conn)
+	// 取得 ip和 socketId
+	ip, socketId := conn.GetIP(r)
 	// 啟動 讀寫 監聽 goroutine
 	conn.Run()
+
 	var exit bool
 	var playCnt int
+	var platformID int = 1
+
+	// 配置登入的使用者
+	user := User{
+		UserId:  socketId,               // 假裝 userId = socketId
+		QueueMg: jobqueue.NewJobQueue(), // 每個使用者配發一個專屬通道, 去跟第三方wallet溝通
+	}
+	user.QueueMg.Run() // 開始監聽用戶工作佇列
+	log.Printf("connect success ip:%v socketId:%v", ip, socketId)
 
 	for {
 
@@ -84,17 +103,46 @@ func userHandler(w http.ResponseWriter, r *http.Request) {
 
 				// TODO:讀取資料庫, 尋找是否有此會員
 
-				// TODO:新增到Redis
+				// TODO:新增 user 到 Redis
+
+				// 向錢包進行提款動作
+				data := map[string]interface{}{
+					"userId": user.UserId, // 使用socketId 暫時當作用戶的UserId
+				}
+				// 寫入工作jueue (取得用戶錢包數量)
+				waitinfo := user.QueueMg.Insert(platformID, user.UserId, "", jobqueue.QUEUE_KIND_WALLET_AMOUNT_GET, true, data)
+				// 等待接收結果
+				userData := user.QueueMg.WaitQueue(waitinfo)
+				log.Printf("amount get userData:%+v", userData)
+
+				amount := userData.Data["amount"]
+
+				// 產生交易Id
+				transactionId := transaction.InstanceGet().MakeId(platformID, user.UserId, "deposit")
+				data = map[string]interface{}{
+					"userId":        user.UserId,   // 使用socketId 暫時當作用戶的UserId
+					"amount":        amount,        // 提幣數量
+					"transactionId": transactionId, // 交易Id
+				}
+
+				// TODO:新增 交易資訊 到 Redis
+				// 開始提幣交易
+				waitinfo = user.QueueMg.Insert(platformID, user.UserId, transactionId, jobqueue.QUEUE_KIND_WALLET_DEPOSIT, true, data)
+				// 等待接收結果
+				userData = user.QueueMg.WaitQueue(waitinfo)
+				log.Printf("deposit waitinfo:%+v", waitinfo)
 
 				// 組合回傳資料
 				result := map[string]interface{}{
-					"cmd":     cmd,
-					"message": "login success",
+
+					"message": "success",
 					"code":    0,
+					"cmd":     cmd,
+					"data":    userData,
 				}
 
 				// 回傳給client
-				log.Printf("result:%v", result)
+				log.Printf("result:%+v", result)
 				conn.WriteMessage(util.MapToJsonByte(result))
 			case "play":
 				log.Printf("收到遊戲封包 data:%v", data)
@@ -105,12 +153,13 @@ func userHandler(w http.ResponseWriter, r *http.Request) {
 				// 遊戲次數增加
 				playCnt++
 				data := map[string]interface{}{
+					"userId":  user.UserId, // 使用socketId 暫時當作用戶的UserId
 					"win":     win,
 					"playCnt": playCnt,
 				}
 				result := map[string]interface{}{
 					"cmd":     cmd,
-					"message": "slot spin",
+					"message": "success",
 					"code":    0,
 					"data":    data,
 				}

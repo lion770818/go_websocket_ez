@@ -3,6 +3,7 @@ package util
 import (
 	"encoding/json"
 	"log"
+	"strconv"
 )
 
 // json字串 轉 map
@@ -41,4 +42,12 @@ func MapToJsonByte(m map[string]interface{}) []byte {
 	}
 
 	return jsonByte
+}
+
+func Str2Int64(s string) int64 {
+	n, e := strconv.ParseInt(s, 10, 64)
+	if e != nil {
+		return 0
+	}
+	return n
 }
